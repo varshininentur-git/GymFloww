@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties={"spring.datasource.url=jdbc:h2:mem:securitytest;DB_CLOSE_DELAY=-1","spring.jpa.hibernate.ddl-auto=create-drop","GYM_CORS_ALLOWED_ORIGINS=https://gymflow.example.test,http://localhost:5173"})
+@SpringBootTest(properties={"spring.datasource.url=jdbc:h2:mem:securitytest;DB_CLOSE_DELAY=-1","spring.jpa.hibernate.ddl-auto=create-drop","GYM_CORS_ALLOWED_ORIGINS=https://gymflow-frontend-pied.vercel.app"})
 @ActiveProfiles("prod")
 @AutoConfigureMockMvc
 class SecurityIntegrationTests {
@@ -57,14 +57,15 @@ class SecurityIntegrationTests {
  private void activate(String token,String password) throws Exception {mvc.perform(csrf(post("/api/auth/activate-member")).contentType(MediaType.APPLICATION_JSON).content("{\"token\":\""+token+"\",\"password\":\""+password+"\"}")).andExpect(status().isNoContent());}
  @Test void unauthenticatedApiIsUnauthorized() throws Exception {mvc.perform(get("/api/members")).andExpect(status().isUnauthorized());}
  @Test void corsUsesConfiguredExactOriginsAndCredentials() throws Exception {
-  mvc.perform(options("/api/auth/me").header("Origin","https://gymflow.example.test").header("Access-Control-Request-Method","GET"))
-    .andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Origin","https://gymflow.example.test")).andExpect(header().string("Access-Control-Allow-Credentials","true"));
+  mvc.perform(options("/api/auth/me").header("Origin","https://gymflow-frontend-pied.vercel.app").header("Access-Control-Request-Method","GET"))
+    .andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Origin","https://gymflow-frontend-pied.vercel.app")).andExpect(header().string("Access-Control-Allow-Credentials","true"));
   mvc.perform(options("/api/auth/me").header("Origin","https://not-allowed.example.test").header("Access-Control-Request-Method","GET"))
     .andExpect(header().doesNotExist("Access-Control-Allow-Origin"));
  }
  @Test void productionProfileMarksSessionAndCsrfCookiesSecure() throws Exception {
-  Cookie csrfCookie=mvc.perform(get("/api/auth/csrf")).andExpect(status().isOk()).andReturn().getResponse().getCookie("XSRF-TOKEN");
-  assertNotNull(csrfCookie);assertTrue(csrfCookie.getSecure());
+  var csrfResponse=mvc.perform(get("/api/auth/csrf")).andExpect(status().isOk()).andReturn().getResponse();
+  Cookie[] csrfCookies=csrfResponse.getCookies();assertTrue(csrfCookies.length>0,"CSRF bootstrap must issue a cookie");Cookie csrfCookie=csrfCookies[csrfCookies.length-1];
+  assertTrue(csrfCookie.getSecure());assertEquals(jsonString(csrfResponse.getContentAsString(),"token"),csrfCookie.getValue());
   var result=mvc.perform(csrf(post("/api/auth/login")).contentType(MediaType.APPLICATION_JSON).content(loginBody("security-staff","staff-test-password-123"))).andExpect(status().isOk()).andReturn();
   assertNotNull(result.getRequest().getSession(false));assertEquals("true",environment.getProperty("server.servlet.session.cookie.secure"));
  }
@@ -75,7 +76,8 @@ class SecurityIntegrationTests {
   mvc.perform(csrf(post("/api/auth/login")).contentType(MediaType.APPLICATION_JSON).content(loginBody("security-admin","wrong-password"))).andExpect(status().isUnauthorized());
  }
  @Test void corsAllowsOnlyConfiguredCredentialedSpaOrigins() throws Exception {
-  mvc.perform(get("/api/auth/csrf").header("Origin","http://localhost:5173")).andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Origin","http://localhost:5173")).andExpect(header().string("Access-Control-Allow-Credentials","true"));
+  mvc.perform(get("/api/auth/csrf").header("Origin","https://gymflow-frontend-pied.vercel.app")).andExpect(status().isOk()).andExpect(header().string("Access-Control-Allow-Origin","https://gymflow-frontend-pied.vercel.app")).andExpect(header().string("Access-Control-Allow-Credentials","true"));
+  mvc.perform(get("/api/auth/csrf").header("Origin","http://localhost:5173")).andExpect(status().isForbidden()).andExpect(header().doesNotExist("Access-Control-Allow-Origin"));
   mvc.perform(get("/api/auth/csrf").header("Origin","https://untrusted.example")).andExpect(status().isForbidden()).andExpect(header().doesNotExist("Access-Control-Allow-Origin"));
  }
  @Test void accountCreationRejectsPasswordsPastBcryptInputLimit() throws Exception {
@@ -159,6 +161,14 @@ class SecurityIntegrationTests {
  }
  @Test void csrfIsRequiredForUnsafeApiCalls() throws Exception {
   MockHttpSession session=signIn("security-staff","staff-test-password-123");mvc.perform(post("/api/members").session(session).contentType(MediaType.APPLICATION_JSON).content("{}" )).andExpect(status().isForbidden());
+ }
+ @Test void loginRejectsMissingAndInvalidCsrfTokens() throws Exception {
+  String body=loginBody("security-staff","staff-test-password-123");
+  mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("csrf_invalid"));
+  var bootstrap=mvc.perform(get("/api/auth/csrf")).andExpect(status().isOk()).andReturn().getResponse();
+  Cookie cookie=bootstrap.getCookie("XSRF-TOKEN");assertNotNull(cookie);
+  mvc.perform(post("/api/auth/login").cookie(cookie).header("X-XSRF-TOKEN","invalid-token")
+    .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("csrf_invalid"));
  }
  @Test void memberCrudCannotGrantOrExtendMembershipOutsideSuccessfulPayment() throws Exception {
   MockHttpSession admin=signIn("security-admin","admin-test-password-123");

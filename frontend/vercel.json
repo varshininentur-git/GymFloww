@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://gymflow-lhvn.onrender.com/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }

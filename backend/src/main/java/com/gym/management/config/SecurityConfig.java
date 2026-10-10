@@ -8,14 +8,17 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.ObjectPostProcessor;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 
 @Configuration
@@ -31,7 +34,18 @@ public class SecurityConfig {
     @Bean SecurityContextRepository securityContextRepository(){return new HttpSessionSecurityContextRepository();}
     @Bean SecurityFilterChain securityFilterChain(HttpSecurity http,CookieCsrfTokenRepository csrfTokens,SecurityContextRepository contexts) throws Exception {
         http.cors(Customizer.withDefaults())
-            .csrf(csrf->csrf.csrfTokenRepository(csrfTokens).csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler()))
+            .csrf(csrf->csrf.csrfTokenRepository(csrfTokens).csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
+                .withObjectPostProcessor(new ObjectPostProcessor<CsrfFilter>() {
+                    @Override public <O extends CsrfFilter> O postProcess(O filter){
+                        filter.setAccessDeniedHandler((request,response,exception)->{
+                            if(exception instanceof CsrfException){
+                                response.setStatus(403);response.setContentType("application/json");response.setCharacterEncoding("UTF-8");
+                                response.getWriter().write("{\"status\":403,\"code\":\"csrf_invalid\",\"message\":\"Security token expired. Retrying securely.\"}");
+                            }else writeJsonError(response,403,"Access denied");
+                        });
+                        return filter;
+                    }
+                }))
             .securityContext(context->context.securityContextRepository(contexts).requireExplicitSave(true))
             .sessionManagement(session->session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED).sessionFixation(fixation->fixation.changeSessionId()))
             .formLogin(form->form.disable()).httpBasic(basic->basic.disable())

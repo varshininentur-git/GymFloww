@@ -4,7 +4,7 @@
 !.env.example
 **/.env
 **/.env.*
-**/!.env.example
+!**/.env.example
 
 # Java / Maven
 **/target/
@@ -25,20 +25,6 @@ backend/data/
 .DS_Store
 .idea/
 .vscode/
-
-# Local environment files
-.env
-.env.*
-!.env.example
-frontend/.env
-frontend/.env.*
-!frontend/.env.example
-
-# Local database files and data
-*.mv.db
-*.trace.db
-*.lock.db
-backend/data/
 
 # Build outputs and dependencies
 **/target/

@@ -1,4 +1,5 @@
-const API = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8080/api' : '/api');
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL || '/api';
+const API = configuredApiBase.replace(/\/+$/, '');
 export const localDateString = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const unsafe = method => !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method.toUpperCase());
 // Keep the token returned by the CSRF bootstrap endpoint in memory. The API may
@@ -20,7 +21,7 @@ async function refreshCsrf() {
   try { return await csrfBootstrap; }
   finally { csrfBootstrap = undefined; }
 }
-async function request(path, options = {}) {
+async function request(path, options = {}, retryCsrf = true) {
   const method = options.method || 'GET';
   const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers };
   if (unsafe(method)) {
@@ -33,6 +34,11 @@ async function request(path, options = {}) {
   if ((path === '/auth/login' || path === '/auth/logout') && response.ok) csrfToken = '';
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
+    if (response.status === 403 && problem.code === 'csrf_invalid' && retryCsrf && unsafe(method)) {
+      csrfToken = '';
+      await refreshCsrf();
+      return request(path, options, false);
+    }
     if (response.status === 401 && path !== '/auth/login') window.dispatchEvent(new Event('gym:unauthorized'));
     const error = new Error(problem.message || `Request failed (${response.status})`);
     error.status = response.status;

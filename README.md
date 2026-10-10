@@ -88,7 +88,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`; the API listens at `http://localhost:8080`. `frontend/.env.example` sets `VITE_API_BASE_URL=http://localhost:8080/api`. Restart Vite after changing the environment file. Backend CORS allows credentials only from `http://localhost:5173` and `http://127.0.0.1:5173`.
+Open `http://localhost:5173`; the API listens at `http://localhost:8080`. Vite proxies `/api` to the backend during development, so copy `frontend/.env.example` to `frontend/.env` (its `/api` base works both locally and in production). Restart Vite after changing environment values. Direct cross-origin local calls are also allowed from `http://localhost:5173` and `http://127.0.0.1:5173` by the backend's development CORS configuration.
 
 Configuration variables:
 
@@ -100,7 +100,7 @@ Configuration variables:
 | `SESSION_COOKIE_SAME_SITE` | Backend | `lax` for same-site HTTPS hosting; use `none` only for cross-site HTTPS and with Secure cookies |
 | `GYM_CORS_ALLOWED_ORIGINS` | Backend | Comma-separated exact browser origins; production must contain the frontend origin(s), not `*` |
 | `H2_CONSOLE_ENABLED` | Backend | `true` locally; set `false` for hosted environments |
-| `VITE_API_BASE_URL` | Frontend build | API base URL ending in `/api`; use `/api` behind a same-origin reverse proxy or the backend HTTPS URL |
+| `VITE_API_BASE_URL` | Frontend build | API base URL ending in `/api`; set `/api` in Vercel and for local Vite development |
 | `VITE_PUBLIC_APP_URL` | Frontend build | Public frontend origin used when ADMIN generates member activation links |
 | `SPRING_DATASOURCE_URL` | Backend (Spring Boot override) | Optional datasource URL override. Leave unset for the preserved `backend/data/gymdb.mv.db`; use a scratch URL for tests. |
 | `SPRING_DATASOURCE_USERNAME` / `SPRING_DATASOURCE_PASSWORD` | Backend | H2 credentials; supply through the host's secret manager for a hosted H2 file |
@@ -116,7 +116,7 @@ cd ../frontend && npm run build
 
 ## Deployment preparation (not deployed)
 
-The application is prepared for a hosted build, but it has not been deployed. Recommended initial architecture: serve the static frontend and backend behind one HTTPS site/reverse proxy, routing `/api/**` to the Spring Boot process and all other paths to the frontend SPA. Configure the proxy to preserve `Set-Cookie`, `Cookie`, and `X-XSRF-TOKEN`, enable React Router history fallback, and forward the hosting `PORT` to the backend process. This same-origin setup lets browser requests use `VITE_API_BASE_URL=/api` and avoids third-party cookie restrictions. If frontend and backend use separate origins, configure the exact frontend origin in CORS and build the frontend with the full backend API URL. Prefer custom domains under the same site for cookie compatibility.
+The application is prepared for deployment, but it has not been deployed or remotely verified. In Vercel, set Root Directory to `frontend`, Framework Preset to Vite, Build Command to `npm run build`, and Output Directory to `dist`. The first `frontend/vercel.json` rewrite proxies only `/api/:path*` to `https://gymflow-lhvn.onrender.com/api/:path*`; the last rewrite sends unmatched SPA paths to `/index.html`. Vercel checks the filesystem before applying rewrites, so built assets are served normally. The API rewrite preserves the browser-visible `/api` path. Set `VITE_API_BASE_URL=/api`. The browser therefore sends cookies to the Vercel origin and Vercel forwards API requests to Render, avoiding cross-site browser cookie restrictions. Keep Render's `SESSION_COOKIE_SAME_SITE=lax` and `SESSION_COOKIE_SECURE=true`. Vercel documents external rewrites as reverse proxies for API requests and recommends the `index.html` fallback for Vite SPA deep links; preview deployments should still be used to verify cookie behavior with this specific app.
 
 Build artifacts and commands:
 
@@ -131,14 +131,16 @@ npm ci
 VITE_API_BASE_URL=/api VITE_PUBLIC_APP_URL=https://gym.example.com npm run build
 ```
 
-For separately hosted frontend/backend origins, replace `/api` with the backend URL, for example `https://api.example.com/api`. Vite variables are embedded at build time; set them in the frontend build environment and rebuild after changing them. `VITE_PUBLIC_APP_URL` should be the public frontend origin. It is used to construct ADMIN-issued activation links; it contains no secret. When unset, the UI uses its current browser origin. The frontend always uses credentialed fetch for the existing session authentication. Production builds without `VITE_API_BASE_URL` use relative `/api`, never a localhost fallback.
+Vite variables are embedded at build time; set them in the frontend build environment and rebuild after changing them. `VITE_PUBLIC_APP_URL` should be the public frontend origin. It is used to construct ADMIN-issued activation links; it contains no secret. When unset, the UI uses its current browser origin. The frontend always uses credentialed fetch for the existing session authentication. Production builds without `VITE_API_BASE_URL` use relative `/api`, never a localhost fallback. Avoid direct cross-origin browser calls to Render: third-party cookie restrictions can break session authentication even with credentialed CORS.
+
+For Render, configure a Docker Web Service with Root Directory `backend` and Dockerfile path `Dockerfile`; the included Dockerfile builds the Spring Boot jar and starts it with `java -jar app.jar`. Keep one service instance and attach a persistent disk mounted at `/var/data` for the H2 database. Set `SPRING_DATASOURCE_URL=jdbc:h2:file:/var/data/gymdb;DB_CLOSE_ON_EXIT=FALSE`; set `SPRING_PROFILES_ACTIVE=prod`, `SESSION_COOKIE_SECURE=true`, `SESSION_COOKIE_SAME_SITE=lax`, `H2_CONSOLE_ENABLED=false`, and `GYM_CORS_ALLOWED_ORIGINS=https://gymflow-frontend-pied.vercel.app`. Set datasource username/password through Render's secret settings. Render supplies `PORT`; the app reads it automatically. Do not set a bootstrap admin password unless creating the first admin, and remove it after the initial account exists. See `backend/.env.example` for placeholders only. The H2 file and in-memory HTTP sessions require one backend instance; scaling out needs a database and shared session store.
 
 Backend hosting environment:
 
 | Variable | Production value / guidance |
 |---|---|
 | `PORT` | Use the port assigned by the hosting platform; Spring Boot binds to it automatically. |
-| `GYM_CORS_ALLOWED_ORIGINS` | Exact origin, e.g. `https://gym.example.com`. Do not include a path or trailing slash. For a same-origin reverse proxy, use that site's origin; no wildcard is permitted. |
+| `GYM_CORS_ALLOWED_ORIGINS` | Exact origin, e.g. `https://gymflow-frontend-pied.vercel.app`. Do not include a path or trailing slash. No wildcard is permitted. |
 | `SESSION_COOKIE_SECURE` | `true` when HTTPS terminates at the host or trusted reverse proxy. |
 | `SESSION_COOKIE_SAME_SITE` | `lax` for same-site deployments. For genuinely cross-site origins, use `none` together with `SESSION_COOKIE_SECURE=true`; some browsers may still block third-party cookies, so prefer a same-site custom domain or proxy. |
 | `SPRING_PROFILES_ACTIVE` | `prod` to apply production secure-cookie defaults and disable the H2 console. |
@@ -155,7 +157,7 @@ Deployment checklist:
 
 1. Choose a hosting plan with HTTPS, a persistent disk for H2, backups, and one backend replica; or complete a separately planned PostgreSQL migration before using multiple instances.
 2. Configure the exact frontend origin in `GYM_CORS_ALLOWED_ORIGINS`; set the frontend API and public app URL at build time.
-3. Enable HTTPS-only cookies (`SESSION_COOKIE_SECURE=true`), keep `SameSite=Lax` for same-site hosting, and preserve CSRF headers/cookies through the proxy. Do not disable CSRF.
+3. Set Vercel `VITE_API_BASE_URL=/api` and use the included `frontend/vercel.json` rewrite to proxy the API to Render. Set Render `GYM_CORS_ALLOWED_ORIGINS=https://gymflow-frontend-pied.vercel.app`, `SESSION_COOKIE_SECURE=true`, and `SESSION_COOKIE_SAME_SITE=lax`; preserve CSRF headers and `Set-Cookie` through the proxy. Do not disable CSRF.
 4. Disable the H2 console, set datasource credentials in a secret manager, and verify the persistent volume is mounted at the configured database path before startup.
 5. Back up existing data before any hosted copy or schema change. This project does not upload, copy, or reset your local database automatically.
 6. Bootstrap or provision the first ADMIN securely, remove the bootstrap password secret afterward, and verify ADMIN, STAFF, and MEMBER authorization using HTTPS.
@@ -170,6 +172,7 @@ Remaining deployment blockers: no hosting provider or domain has been selected/c
 - `MEMBER` accounts can access only their own `/api/member/**` resources. Their member identity comes from the server-side account-to-member link, never a browser-supplied member ID. ADMIN/STAFF application permissions continue to be enforced by Spring Security.
 - The frontend protects all application routes and redirects anonymous visitors to the login page. It restores the user from the backend session on refresh and returns to login if the session expires.
 - Authentication uses server-side HTTP sessions, BCrypt password hashing, pre-login session invalidation, HttpOnly `JSESSIONID`, and `SameSite=Lax`. CSRF protection remains enabled for state-changing requests; tokens are cleared at login/logout. The API issues an `XSRF-TOKEN` cookie; the frontend sends its value in `X-XSRF-TOKEN`.
+- The CSRF bootstrap returns the token in its JSON response as well as a readable cookie. The frontend sends the returned token from in-memory state; this also works when `/api` is reverse-proxied and the API cookie is host-only. For Vercel/Render, use the same-origin Vercel rewrite and `VITE_API_BASE_URL=/api`; direct cross-site requests may fail in Safari because third-party session cookies can be blocked.
 - `SESSION_COOKIE_SECURE` defaults to `false` for local HTTP. Set `SESSION_COOKIE_SECURE=true` when serving over HTTPS. Do not expose this development configuration over plain HTTP on a public network.
 - `ADMIN` can manage accounts, plans, trainers, member profiles, fee adjustments, and mock payment processing/cancellation. `STAFF` can view members/plans/trainers, create/update member profiles, record attendance, create payment requests, view payment history/receipts/reports, and use the dashboard. Member profile APIs cannot assign or extend a membership; only a successful payment changes membership plans or dates. The backend enforces these rules regardless of frontend navigation visibility.
 - `MEMBER` can view a member dashboard, read-only profile, current membership, own attendance/payment history, and eligible receipts; members can also create/edit/delete their own fitness entries, goals, workout plans/sessions, meal logs, water logs and notification read status. Ownership is resolved on the server and nested-resource mutations check ownership. Members cannot edit membership dates/status, payments, attendance, or protected profile/account fields.

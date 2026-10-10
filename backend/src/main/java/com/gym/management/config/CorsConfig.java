@@ -13,7 +13,7 @@ public class CorsConfig {
     @Bean CorsConfigurationSource corsConfigurationSource(@Value("${gym.cors.allowed-origins}") String allowedOrigins) {
         CorsConfiguration config=new CorsConfiguration();
         config.setAllowedOrigins(List.of(allowedOrigins.split(",")).stream().map(String::trim).filter(origin->!origin.isEmpty()).toList());
-        config.setAllowedMethods(List.of("GET","POST","PUT","DELETE","OPTIONS"));
+        config.setAllowedMethods(List.of("GET","HEAD","POST","PUT","PATCH","DELETE","OPTIONS"));
         config.setAllowedHeaders(List.of("Content-Type","X-XSRF-TOKEN"));
         config.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source=new UrlBasedCorsConfigurationSource();
